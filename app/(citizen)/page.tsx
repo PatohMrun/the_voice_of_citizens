@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Search, ChevronRight, CheckCircle2, User, Building, Map, Flag, Send, Bot, FileText, Paperclip, X, TrendingUp, AlertTriangle, CheckCircle, Calendar, Timer } from 'lucide-react';
+import { MapPin, Search, ChevronRight, CheckCircle2, User, Building, Map, Flag, Send, Bot, FileText, Paperclip, X, TrendingUp, AlertTriangle, CheckCircle, Calendar, Timer, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { resolveLocationAction, matchCandidatesAction } from '@/agents';
 
 // Mock data to simulate the backend resolution
 const MOCK_LOCATION = {
@@ -43,6 +44,10 @@ export default function CitizenLandingPage() {
   const [locationInput, setLocationInput] = useState("");
   const [isResolved, setIsResolved] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
+  
+  const [resolvedLocation, setResolvedLocation] = useState(MOCK_LOCATION);
+  const [candidates, setCandidates] = useState(MOCK_CANDIDATES);
+  const [isMatching, setIsMatching] = useState(false);
 
   // Chat state
   const [chatInput, setChatInput] = useState("");
@@ -61,19 +66,33 @@ export default function CitizenLandingPage() {
     scrollToBottom();
   }, [messages]);
 
-  const handleResolveLocation = (e: React.FormEvent) => {
+  const handleResolveLocation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!locationInput.trim()) return;
     
     setIsResolving(true);
-    // Simulate backend API call
-    setTimeout(() => {
-      setIsResolving(false);
-      setIsResolved(true);
-    }, 1200);
+    
+    try {
+      const result = await resolveLocationAction(locationInput);
+      if (result.success && result.data) {
+        setResolvedLocation({
+          ward: result.data.ward || "Unknown Ward",
+          constituency: result.data.constituency,
+          county: result.data.county,
+          national: result.data.national
+        });
+      } else {
+        setResolvedLocation(MOCK_LOCATION); // fallback
+      }
+    } catch (err) {
+      setResolvedLocation(MOCK_LOCATION); // fallback
+    }
+
+    setIsResolving(false);
+    setIsResolved(true);
   };
 
-  const handleSendMessage = (e?: React.FormEvent | React.KeyboardEvent) => {
+  const handleSendMessage = async (e?: React.FormEvent | React.KeyboardEvent) => {
     if (e) e.preventDefault();
     if (!chatInput.trim() && !attachedFile) return;
     
@@ -86,11 +105,35 @@ export default function CitizenLandingPage() {
     setMessages(prev => [...prev, newMsg]);
     setChatInput("");
     setAttachedFile(null);
+    setIsMatching(true);
     
-    // Simulate AI response and highlighting logic
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'I found some strong matches based on your interest in those topics! I have highlighted candidates with high match scores in the center feed. Their manifestos strongly align with your priorities.' }]);
-    }, 1500);
+    try {
+      const adminUnitId = resolvedLocation.ward || resolvedLocation.constituency;
+      const result = await matchCandidatesAction(userMsg, adminUnitId);
+      
+      if (result.success && result.data) {
+        setCandidates(prev => prev.map(c => {
+          const matchInfo = result.data?.find((m: any) => m.candidateId === c.id);
+          if (matchInfo) {
+            return { ...c, match: matchInfo.matchScore };
+          }
+          return c;
+        }));
+
+        const bestMatch = result.data.sort((a:any, b:any) => b.matchScore - a.matchScore)[0];
+        const aiResponse = bestMatch 
+          ? `Based on your priorities, I found some strong matches! For example, **${bestMatch.candidateName}** has a ${bestMatch.matchScore}% match because: ${bestMatch.explanation}. I have updated the match scores in the center feed.`
+          : 'I have analyzed your priorities and updated the candidate match scores in the center feed!';
+          
+        setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error matching candidates. Please try again later.' }]);
+      }
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'An unexpected error occurred. Please try again.' }]);
+    }
+    
+    setIsMatching(false);
   };
 
   return (
@@ -162,11 +205,11 @@ export default function CitizenLandingPage() {
                   <span className="font-semibold text-sm tracking-wide uppercase">Location Resolved</span>
                 </div>
                 <h2 className="text-xl md:text-2xl font-bold text-slate-900 flex flex-wrap items-center gap-2">
-                  <span>{MOCK_LOCATION.ward}</span>
+                  <span>{resolvedLocation.ward}</span>
                   <ChevronRight className="w-5 h-5 text-slate-400" />
-                  <span className="text-slate-600">{MOCK_LOCATION.constituency}</span>
+                  <span className="text-slate-600">{resolvedLocation.constituency}</span>
                   <ChevronRight className="w-5 h-5 text-slate-400" />
-                  <span className="text-slate-600">{MOCK_LOCATION.county}</span>
+                  <span className="text-slate-600">{resolvedLocation.county}</span>
                 </h2>
               </div>
               <button 
@@ -232,37 +275,37 @@ export default function CitizenLandingPage() {
                   
                   <LevelSection 
                     title="Ward Candidates" 
-                    subtitle={MOCK_LOCATION.ward} 
+                    subtitle={resolvedLocation.ward} 
                     icon={<User className="w-5 h-5 text-emerald-600" />}
                     iconBg="bg-emerald-100"
-                    candidates={MOCK_CANDIDATES.filter(c => c.level === 'Ward')} 
+                    candidates={candidates.filter(c => c.level === 'Ward')} 
                     messagesLength={messages.length}
                   />
                   
                   <LevelSection 
                     title="Constituency Candidates" 
-                    subtitle={MOCK_LOCATION.constituency} 
+                    subtitle={resolvedLocation.constituency} 
                     icon={<Building className="w-5 h-5 text-blue-600" />}
                     iconBg="bg-blue-100"
-                    candidates={MOCK_CANDIDATES.filter(c => c.level === 'Constituency')} 
+                    candidates={candidates.filter(c => c.level === 'Constituency')} 
                     messagesLength={messages.length}
                   />
                   
                   <LevelSection 
                     title="County Candidates" 
-                    subtitle={MOCK_LOCATION.county} 
+                    subtitle={resolvedLocation.county} 
                     icon={<Map className="w-5 h-5 text-purple-600" />}
                     iconBg="bg-purple-100"
-                    candidates={MOCK_CANDIDATES.filter(c => c.level === 'County')} 
+                    candidates={candidates.filter(c => c.level === 'County')} 
                     messagesLength={messages.length}
                   />
 
                   <LevelSection 
                     title="National Candidates" 
-                    subtitle={MOCK_LOCATION.national} 
+                    subtitle={resolvedLocation.national} 
                     icon={<Flag className="w-5 h-5 text-amber-600" />}
                     iconBg="bg-amber-100"
-                    candidates={MOCK_CANDIDATES.filter(c => c.level === 'National')} 
+                    candidates={candidates.filter(c => c.level === 'National')} 
                     messagesLength={messages.length}
                   />
                 </div>
@@ -339,10 +382,10 @@ export default function CitizenLandingPage() {
                     />
                     <button 
                       type="submit" 
-                      disabled={!chatInput.trim() && !attachedFile}
+                      disabled={(!chatInput.trim() && !attachedFile) || isMatching}
                       className="bg-blue-600 text-white p-2.5 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center shrink-0"
                     >
-                      <Send className="w-4 h-4 ml-0.5" />
+                      {isMatching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 ml-0.5" />}
                     </button>
                   </form>
                 </div>

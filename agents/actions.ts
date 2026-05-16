@@ -1,6 +1,6 @@
 'use server'
 
-import { Session, InvocationContext } from '@google/adk';
+import { InMemoryRunner } from '@google/adk';
 import { locationPipeline } from './workflows/locationWorkflow';
 import { candidateMatchPipeline } from './workflows/candidateMatchWorkflow';
 import { factCheckPipeline } from './workflows/factCheckWorkflow';
@@ -8,9 +8,12 @@ import { AdminTreeSchema, CandidateMatchSchema, FactCheckVerdictSchema } from '.
 
 /** Helper to run an ADK pipeline, extract the final text, and parse JSON */
 async function runAdkPipeline(pipeline: any, state: Record<string, any>, targetAuthor: string) {
-	const session = new Session({ state });
-	const context = new InvocationContext({ session });
-	const stream = pipeline.runAsync(context);
+	const runner = new InMemoryRunner({ agent: pipeline, appName: 'VoteWise' });
+	const stream = runner.runEphemeral({
+		userId: "system",
+		stateDelta: state,
+		newMessage: { parts: [{ text: JSON.stringify(state) }] }
+	});
 
 	let finalOutput = "";
 	for await (const event of stream) {
